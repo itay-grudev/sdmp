@@ -1,5 +1,6 @@
 # Build output
 **/bin
+**/lib
 
 ##
 # CMake
@@ -15,3 +16,5 @@
 **/compile_commands.json
 **/CTestTestfile.cmake
 **/_deps
+**/CPackConfig.cmake
+**/CPackSourceConfig.cmake

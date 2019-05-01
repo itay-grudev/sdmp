@@ -27,7 +27,7 @@ set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin )
 file( GLOB SOURCES
     "src/*.cpp"
 )
-add_executable( sdmp-server ${SOURCES} )
+add_executable( ${PROJECT_NAME} ${SOURCES} )
 
 include( CMakeDetermineSystem )
 include( CheckCCompilerFlag )
