@@ -16,8 +16,9 @@ make
 ```
 
 ## License
-Copyright Itay Grudev (c) 2019. Distributed under the terms of GNU GPL v3 or later.
+Copyright Itay Grudev (c) 2019. Distributed under the terms of the GNU GPL v3 or later.
 
 Portions of this software include code from other projects compatible with the
-GNU GPL v3 license. Refer to the licensing information in the begining of each
-file. Full license list can be found in the `LICENSES` directory.
+GNU GPL v3 license. Refer to the licensing information in the beginning of each
+file. Full license list of all direct project dependencies can be found in the
+`LICENSES` directory.
