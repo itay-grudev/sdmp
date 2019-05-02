@@ -10,11 +10,6 @@ set( SDMPServer_VERSION_REV 0 )
 cmake_minimum_required( VERSION 2.6 )
 
 ##
-# CMake Modules
-#
-SET( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/cmake/Modules/" )
-
-##
 # Build Properties
 #
 set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib )
@@ -50,20 +45,20 @@ check_include_files( pistache/endpoint.h    HAVE_PISTACHE_ENDPOINT_H )
 check_include_files( odb/core.hxx           HAVE_ODB_CORE_H )
 
 include(GnuTLS)
-target_link_libraries( sdmp-server ${GNUTLS_LIBRARIES} )
+target_link_libraries( ${PROJECT_NAME} ${GNUTLS_LIBRARIES} )
 
 ##
 # SSL Private key & Certificate
 #
-add_custom_target( ssl-cert ALL DEPENDS server.crt )
+add_custom_target( ssl-cert ALL DEPENDS ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/server.key ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/server.crt )
 
 add_custom_command(
-    OUTPUT   server.key
-    COMMAND  openssl genrsa -out ${CMAKE_BINARY_DIR}/bin/server.key 4096
+    OUTPUT   ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/server.key
+    COMMAND  openssl genrsa -out ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/server.key 4096
 )
 
 add_custom_command(
-    OUTPUT   server.crt
-    COMMAND  openssl req -new -days 365 -nodes -x509 -subj "/C=/ST=/L=/O=/CN=" -key ${CMAKE_BINARY_DIR}/bin/server.key -out ${CMAKE_BINARY_DIR}/bin/server.crt
-    DEPENDS  server.key
+    OUTPUT   ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/server.crt
+    COMMAND  openssl req -new -days 365 -nodes -x509 -subj "/C=/ST=/L=/O=/CN=" -key ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/server.key -out ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/server.crt
+    DEPENDS  ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/server.key
 )

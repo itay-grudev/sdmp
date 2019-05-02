@@ -6,6 +6,7 @@ implementation.
 ## Requirements
     * `odb`
     * `gnutls`
+    * `gnulib`
     * GNU `getopt` (with support for `getopt_long` available in the GNU implementation)
 
 ## Building
