@@ -7,7 +7,7 @@ set( SDMPServer_VERSION_MINOR 1 )
 set( SDMPServer_VERSION_REV 0 )
 
 # CMake version
-cmake_minimum_required (VERSION 2.6)
+cmake_minimum_required( VERSION 2.6 )
 
 ##
 # CMake Modules
