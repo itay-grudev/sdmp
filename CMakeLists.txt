@@ -28,3 +28,4 @@ set( CMAKE_CXX_STANDARD 11 )
 #
 add_subdirectory( libs/pistache )
 add_subdirectory( sdmp-server )
+add_subdirectory( sdmp-client )
