@@ -101,13 +101,10 @@ int main( int argc, char* argv[] )
     int sd, ii;
     char buffer[MAX_BUF + 1];
 
-    if( gnutls_check_version( "3.1.4" ) == NULL ) {
-        std::cerr << "GnuTLS 3.1.4 or later is required." << std::endl;
+    if( gnutls_check_version( "3.3.0" ) == NULL ) {
+        std::cerr << "GnuTLS 3.3.0 or later is required." << std::endl;
         return error();
     }
-
-    // For backwards compatibility with gnutls < 3.3.0
-    gnutls_global_init();
 
     gnutls_srp_allocate_client_credentials( &srp_cred );
     gnutls_certificate_allocate_credentials( &cert_cred );
@@ -191,8 +188,6 @@ end:
 
     gnutls_srp_free_client_credentials( srp_cred );
     gnutls_certificate_free_credentials( cert_cred );
-
-    gnutls_global_deinit();
 
     return 0;
 }
