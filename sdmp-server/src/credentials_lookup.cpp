@@ -55,9 +55,10 @@ int credentials_lookup(gnutls_session_t session, const char *username,
     salt->size = 24;
     if( gnutls_rnd( GNUTLS_RND_NONCE, salt->data, salt->size )) return -1;
 
+    // Generate verifier
     if(
-        gnutls_srp_verifier( username, "kolko", salt, generator, prime, verifier )
+        gnutls_srp_verifier( username, "password", salt, generator, prime, verifier )
     ) return -1;
 
-	return 0;
+    return 0;
 }
