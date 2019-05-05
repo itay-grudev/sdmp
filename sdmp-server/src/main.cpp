@@ -142,8 +142,8 @@ int main( int argc, char* argv[] )
     // SRP Credentials initialisation
     gnutls_srp_server_credentials_t srp_cred;
     gnutls_srp_allocate_server_credentials( &srp_cred );
+    gnutls_srp_set_server_credentials_file( srp_cred, "tpasswd", "tpasswd.conf" );
     gnutls_srp_set_server_credentials_function( srp_cred, credentials_lookup );
-    // gnutls_srp_set_server_credentials_file( srp_cred, SRP_PASSWD, SRP_PASSWD_CONF );
 
     gnutls_certificate_allocate_credentials( &cert_cred );
     gnutls_certificate_set_x509_trust_file( cert_cred, CAFILE, GNUTLS_X509_FMT_PEM );

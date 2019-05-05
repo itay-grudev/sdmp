@@ -21,14 +21,7 @@
 #include <cstring>
 #include <unistd.h>
 #include <gnutls/gnutls.h>
-
-extern char * username;
-extern char * password;
-
-/**
- * Prompts the user for credentials
- * @return 0 on success -1 on error
- */
+#include <gnutls/crypto.h>
 
 /**
  * Lookups a user SRP credentials in a database
@@ -41,28 +34,30 @@ extern char * password;
  * @return 0 on success -1 indicates an error
  * @see gnutls_srp_set_server_credentials_function
  */
-int credentials_lookup(
-    gnutls_session_t,
-    const char* username,
-    gnutls_datum_t *salt,
-    gnutls_datum_t *verifier,
-    gnutls_datum_t *generator,
-    gnutls_datum_t *prime
-){
-    // gnutls_malloc( strlen( tmp ) + 2 );
+int credentials_lookup(gnutls_session_t session, const char *username,
+	gnutls_datum_t *salt, gnutls_datum_t *verifier, gnutls_datum_t *generator, gnutls_datum_t *prime)
+{
+    // Generator and Prime
+    // The following two sections of code do the same thing a different way.
+    // I've left both so the code could be later reused.
+    generator->size = gnutls_srp_4096_group_generator.size;
+    generator->data = (unsigned char*)gnutls_malloc( generator->size );
+    memcpy( generator->data, gnutls_srp_4096_group_generator.data, generator->size );
 
-    // ito:
-    // 2XSLzjo1cUrBvmACdqmYiM1iMarH3m/L1dCd1SQUnzvN7J7a.64jjJsITRYCWVHT8XK/LGI7SOSM9dIKsMU5u3XBozfqVbEzFHF6lk15qKLZGuSRfFdpZmC4L0CXqB7abo3FLvL1V4IVglnlNol7MQKIlZBHVZsXtWSpmrRDn8rAnlBysZEOQqKb76MXchedyX0Sn1q3x9vNtrYEIEiVkzmi2OFJ0vRTaCudhdkvkLy.7EhC6f8FDVjpN3MZkC3YR7kO5cy9tgMAcnbuw5FLDxPwuUZdkLzt2IyU2s93MUT.ptUBEQH6M5aHV.wQEG2CZsUNSEHPiFXpRUuUtgs2Rl:
-    // 1yAl.uAjYG69Wbokr.kryl:
-    // 3
+    gnutls_datum_t n;
+    gnutls_srp_base64_encode_alloc( &gnutls_srp_4096_group_prime, &n );
+    gnutls_srp_base64_decode_alloc( &n, prime );
+    gnutls_free(n.data);
 
-    printf( "%s\n", (char*)username );
-    printf( "%s\n", (char*)salt );
-    printf( "%s\n", (char*)verifier );
-    printf( "%d\n", (long)generator );
-    printf( "%s\n", (char*)prime );
+    // Generate salt
+    // Fatal in parts of session if broken, i.e., vulnerable to statistical analysis.
+    salt->data = (unsigned char*)gnutls_malloc( 24 );
+    salt->size = 24;
+    if( gnutls_rnd( GNUTLS_RND_NONCE, salt->data, salt->size )) return -1;
 
-    // return -1;
+    if(
+        gnutls_srp_verifier( username, "kolko", salt, generator, prime, verifier )
+    ) return -1;
 
-    return 0;
+	return 0;
 }
