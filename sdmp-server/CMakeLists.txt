@@ -24,19 +24,13 @@ file( GLOB SOURCES
 )
 add_executable( ${PROJECT_NAME} ${SOURCES} )
 
-include( CMakeDetermineSystem )
-include( CheckCCompilerFlag )
-include( CheckFunctionExists )
-include( CheckSymbolExists )
-include( CheckIncludeFile )
-include( CheckIncludeFileCXX )
-include( CheckIncludeFiles )
-include( CheckLibraryExists )
-include( CMakeDependentOption )
 
 ##
 # Required packages
 #
+include( CheckIncludeFiles )
+include( CheckFunctionExists )
+
 check_include_files( getopt.h               HAVE_GETOPT_H )
 check_function_exists( getopt_long          HAVE_GETOPT_LONG )
 check_include_files( unistd.h               HAVE_UNISTD_H )
@@ -44,8 +38,15 @@ check_include_files( arpa/inet.h            HAVE_ARPA_INET_H )
 check_include_files( pistache/endpoint.h    HAVE_PISTACHE_ENDPOINT_H )
 check_include_files( odb/core.hxx           HAVE_ODB_CORE_H )
 
+# GnuTLS
 include(GnuTLS)
 target_link_libraries( ${PROJECT_NAME} ${GNUTLS_LIBRARIES} )
+
+# Pistache
+set( PISTACHE_DIR "libs/pistache/" )
+include_directories( ${CMAKE_SOURCE_DIR} ${PISTACHE_DIR} "include/" )
+target_link_libraries( ${PROJECT_NAME}  ${CMAKE_LIBRARY_OUTPUT_DIRECTORY} "libpistache.a" )
+target_link_libraries( ${PROJECT_NAME}  "pthread" )
 
 ##
 # SSL Private key & Certificate

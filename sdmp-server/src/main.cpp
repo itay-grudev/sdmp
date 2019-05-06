@@ -31,10 +31,14 @@
 #include <arpa/inet.h>
 
 // HTTP REST framework
+#include <pistache/net.h>
 #include <pistache/endpoint.h>
 
 // GnuTLS
 #include <gnutls/gnutls.h>
+
+// Web API
+#include "registration_server.h"
 
 // Data Storage
 #include "data/user.h"
@@ -133,6 +137,16 @@ int main( int argc, char* argv[] )
                 return help();
         }
     }
+
+
+    Pistache::Address addr(Pistache::Ipv4::any(), Pistache::Port(9080));
+
+    auto opts = Pistache::Http::Endpoint::options().threads(1);
+    Pistache::Http::Endpoint server(addr);
+    server.init(opts);
+    server.setHandler( std::make_shared<RegistrationHandler>() );
+    server.serve();
+
 
     if( gnutls_check_version( "3.3.0" ) == NULL ){
         std::cerr << "GnuTLS 3.3.0 or later is required." << std::endl;
