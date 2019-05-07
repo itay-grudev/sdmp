@@ -45,8 +45,29 @@ target_link_libraries( ${PROJECT_NAME} ${GNUTLS_LIBRARIES} )
 # Pistache
 set( PISTACHE_DIR "libs/pistache/" )
 include_directories( ${CMAKE_SOURCE_DIR} ${PISTACHE_DIR} "include/" )
-target_link_libraries( ${PROJECT_NAME}  ${CMAKE_LIBRARY_OUTPUT_DIRECTORY} "libpistache.a" )
-target_link_libraries( ${PROJECT_NAME}  "pthread" )
+target_link_libraries( ${PROJECT_NAME}  "pthread" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libpistache.a" )
+
+##
+# Embed files
+#
+set( RC_DEPENDS "" )
+function( add_resource input )
+    string( MAKE_C_IDENTIFIER ${input} input_identifier )
+    set( output "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}/${input_identifier}.o" )
+    target_link_libraries( ${PROJECT_NAME} ${output} )
+
+    add_custom_command(
+        OUTPUT ${output}
+        COMMAND ${CMAKE_LINKER} --relocatable --format binary --output ${output} ${input}
+        DEPENDS ${input}
+    )
+
+    set( RC_DEPENDS ${RC_DEPENDS} ${output} PARENT_SCOPE )
+endfunction()
+add_resource( "src/static/index.html" )
+add_resource( "src/static/status.json" )
+add_resource( "src/static/not_found.json" )
+add_custom_target( rc ALL DEPENDS ${RC_DEPENDS} )
 
 ##
 # SSL Private key & Certificate

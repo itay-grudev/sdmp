@@ -18,6 +18,7 @@
  */
 
 // Base
+#include <csignal>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,7 +39,7 @@
 #include <gnutls/gnutls.h>
 
 // Web API
-#include "registration_server.h"
+#include "public_api.h"
 
 // Data Storage
 #include "data/user.h"
@@ -52,7 +53,7 @@
 #define LOOP_CHECK( rval, cmd ) \
     do { \
         rval = cmd; \
-    } while( rval == GNUTLS_E_AGAIN || rval == GNUTLS_E_INTERRUPTED )
+    } while( !ExitFlag && rval == GNUTLS_E_AGAIN || rval == GNUTLS_E_INTERRUPTED )
 #define SOCKET_ERR( err,s ) if( err == -1 ){ perror( s ); return( 1 ); }
 
 // Defined in credentials_lookup.cpp
@@ -60,30 +61,15 @@ int credentials_lookup( gnutls_session_t, const char*, gnutls_datum_t*, gnutls_d
 
 // Help and usage
 #define USAGE_MENU "Usage: sdmp-server [-p <port>] [-h] [--help]"
-
-int help() {
-    std::cout << USAGE_MENU << "\n";
-    std::cout << "Options:" << "\n";
-    std::cout << "   -p, --port        Sets the port number to listen on.\n";
-    std::cout << "   -h, --help        Show an extended usage menu and exit.\n";
-    std::cout << "\n"
-        "Copyright Itay Grudev (C) 2019 all rights reserved. This program is "
-        "released under the terms of the GNU General Public License, version 3 "
-        "or later." << std::endl;
-        return 0;
-}
-
-inline int usage(){
-    std::cout << USAGE_MENU << std::endl;
-    return 0;
-}
-
-inline int error(){
-    std::cerr << USAGE_MENU << std::endl;
-    return 1;
-}
+int help();
+inline int usage();
+inline int error();
 
 bool VerboseFlag = false;
+bool ExitFlag = false;
+PublicApi *public_api;
+
+void signal_handler( int );
 
 int main( int argc, char* argv[] )
 {
@@ -97,15 +83,21 @@ int main( int argc, char* argv[] )
     gnutls_certificate_credentials_t cert_cred;
     char buffer[MAX_BUF + 1];
     int optval = 1;
-    uint32_t port = 8080; // Intentionally using int32 for atoi converion
+
+    // Intentionally using int32 for atoi converion
+    uint32_t httpPort = 2585;
+    uint32_t srpPort = 2586;
 
     // Parsing command line arguments
     int c;
     while( true ){
         static struct option long_options[] = {
-            { "help",      no_argument,       nullptr, 'h' },
-            { "verbose",   no_argument,       nullptr, 'v' },
-            { "port",  required_argument,     nullptr, 'p' },
+            { "help",           no_argument,            nullptr, 'h' },
+            { "verbose",        no_argument,            nullptr, 'v' },
+            { "public-port",    required_argument,      nullptr, 'p' },
+            { "srp-port",       required_argument,      nullptr, 'r' },
+            { "use-ssl",        required_argument,      nullptr, 's' },
+            { "concurrency",    required_argument,      nullptr, 'c' },
             {0, 0, 0, 0}
         };
 
@@ -126,9 +118,21 @@ int main( int argc, char* argv[] )
                 break;
             case 'h':
                 return help();
+                break;
+            case 's':
+                VerboseFlag = true;
+                std::printf( "VerboseFlag\n" );
+                break;
             case 'p':
-                port = atoi( optarg );
-                if( port == 0 || port > 65535 ){
+                httpPort = atoi( optarg );
+                if( httpPort == 0 || httpPort > 65535 ){
+                    std::cerr << "Invalid port specified." << std::endl;
+                    return error();
+                }
+                break;
+            case 'r':
+                srpPort = atoi( optarg );
+                if( srpPort == 0 || srpPort > 65535 ){
                     std::cerr << "Invalid port specified." << std::endl;
                     return error();
                 }
@@ -138,15 +142,17 @@ int main( int argc, char* argv[] )
         }
     }
 
+    // Attach signal handlers to terminate the server gracefully
+    std::signal( SIGHUP,  signal_handler );
+    std::signal( SIGINT,  signal_handler );
+    std::signal( SIGTERM, signal_handler );
 
-    Pistache::Address addr(Pistache::Ipv4::any(), Pistache::Port(9080));
-
-    auto opts = Pistache::Http::Endpoint::options().threads(1);
-    Pistache::Http::Endpoint server(addr);
-    server.init(opts);
-    server.setHandler( std::make_shared<RegistrationHandler>() );
-    server.serve();
-
+    // Public API
+    Pistache::Address public_api_addr( Pistache::Ipv4::any(), Pistache::Port( httpPort ));
+    public_api = new PublicApi( public_api_addr );
+    public_api->init( Pistache::hardware_concurrency() );
+    public_api->start();
+    printf( "SDMP Server ready. Listening on port '%d'.\n", httpPort );
 
     if( gnutls_check_version( "3.3.0" ) == NULL ){
         std::cerr << "GnuTLS 3.3.0 or later is required." << std::endl;
@@ -170,7 +176,7 @@ int main( int argc, char* argv[] )
     memset( &sa_serv, '\0', sizeof(sa_serv) );
     sa_serv.sin_family = AF_INET;
     sa_serv.sin_addr.s_addr = INADDR_ANY;
-    sa_serv.sin_port = htons( port );
+    sa_serv.sin_port = htons( srpPort );
 
     setsockopt( listen_sd, SOL_SOCKET, SO_REUSEADDR, (void*)&optval, sizeof(int) );
 
@@ -179,10 +185,10 @@ int main( int argc, char* argv[] )
     err = listen( listen_sd, 1024 );
     SOCKET_ERR( err, "listen" );
 
-    printf( "SDMP Server ready. Listening on port '%d'.\n\n", port );
+    printf( "SDMP Server ready. Listening on port '%d'.\n\n", srpPort );
 
     client_len = sizeof( sa_cli );
-    for( ;; ){
+    while( !ExitFlag ){
         gnutls_init( &session, GNUTLS_SERVER );
         gnutls_priority_set_direct(
             session,
@@ -226,7 +232,7 @@ int main( int argc, char* argv[] )
 
         // print_info( session );
 
-        for( ;; ){
+        while( !ExitFlag ){
             LOOP_CHECK( ret, gnutls_record_recv( session, buffer, MAX_BUF ));
 
             if( ret == 0 ){
@@ -265,5 +271,42 @@ int main( int argc, char* argv[] )
     gnutls_srp_free_server_credentials( srp_cred );
     gnutls_certificate_free_credentials( cert_cred );
 
+    public_api->stop();
     return 0;
+}
+
+void signal_handler( int signal ){
+    switch( signal ){
+        case SIGHUP:
+        case SIGINT:
+        case SIGTERM:
+            ExitFlag = true;
+            public_api->stop();
+            printf( "Shutting down...\n" );
+            break;
+    }
+}
+
+inline int usage(){
+    std::cout << USAGE_MENU << std::endl;
+    return 0;
+}
+
+inline int error(){
+    std::cerr << USAGE_MENU << std::endl;
+    return 1;
+}
+
+int help() {
+    std::cout << USAGE_MENU << "\n";
+    std::cout << "Options:" << "\n";
+    std::cout << "   -p, --public-port  Sets the port number for the public HTTP API.\n";
+    std::cout << "   -s, --use-ssl      Set to use HTTPS instead of HTTP for the public API.\n";
+    std::cout << "   -r, --srp-port     Sets the port number for SRP connections.\n";
+    std::cout << "   -h, --help         Show an extended usage menu and exit.\n";
+    std::cout << "\n"
+        "Copyright Itay Grudev (C) 2019 all rights reserved. This program is "
+        "released under the terms of the GNU General Public License, version 3 "
+        "or later." << std::endl;
+        return 0;
 }
