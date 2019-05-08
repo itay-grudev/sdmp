@@ -13,18 +13,15 @@
 
 #include <pistache/net.h>
 #include <pistache/os.h>
+#include <pistache/peer.h>
 #include <pistache/async.h>
 #include <pistache/stream.h>
 
-#ifdef PISTACHE_USE_SSL
+#define PISTACHE_SSL_GNUTLS
 
-#include <openssl/ssl.h>
-
-
-#endif /* PISTACHE_USE_SSL */
-
-
-
+#ifdef PISTACHE_SSL_GNUTLS
+#include <gnutls/gnutls.h>
+#endif /* PISTACHE_SSL_GNUTLS */
 
 namespace Pistache {
     namespace Http { namespace Private { class ParserBase; } }
@@ -32,13 +29,16 @@ namespace Tcp {
 
 class Transport;
 
-class Peer {
+// TODO: Verify this inheritance is correct
+// When submiting a full rewrite with GnuTLS this will no longer be necesarry
+// as there will just Peer
+class SRPPeer : public Peer {
 public:
     friend class Transport;
 
-    Peer();
-    Peer(const Address& addr);
-    ~Peer();
+    SRPPeer();
+    SRPPeer(const Address& addr);
+    ~SRPPeer();
 
     const Address& address() const;
     const std::string& hostname() const;
@@ -46,8 +46,10 @@ public:
     void associateFd(Fd fd);
     Fd fd() const;
 
-    void associateSSL(void *ssl);
-    void *ssl(void) const;
+    void initTLSSession();
+    // void setTLSCredential( gnutls_credentials_type_t type, void *cred );
+    void initTLSSession( gnutls_session_t* gnutls_session );
+    gnutls_session_t* gnutls_session();
 
     void putData(std::string name, std::shared_ptr<Pistache::Http::Private::ParserBase> data);
     std::shared_ptr<Pistache::Http::Private::ParserBase> getData(std::string name) const;
@@ -66,10 +68,10 @@ private:
     std::string hostname_;
     std::unordered_map<std::string, std::shared_ptr<Pistache::Http::Private::ParserBase>> data_;
 
-    void *ssl_;
+    gnutls_session_t *gnutls_session_;
 };
 
-std::ostream& operator<<(std::ostream& os, const Peer& peer);
+std::ostream& operator<<(std::ostream& os, const SRPPeer& peer);
 
 } // namespace Tcp
 } // namespace Pistache

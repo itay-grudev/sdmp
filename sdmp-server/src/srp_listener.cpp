@@ -3,14 +3,13 @@
 
 */
 
-#include <pistache/listener.h>
-#include <pistache/peer.h>
 #include <pistache/common.h>
 #include <pistache/os.h>
 #include <pistache/transport.h>
 #include <pistache/errors.h>
 
 #include <sys/socket.h>
+
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
@@ -26,13 +25,18 @@
 #include <cerrno>
 #include <signal.h>
 
-#ifdef PISTACHE_USE_SSL
+#define PISTACHE_SSL_GNUTLS
 
-#include <openssl/ssl.h>
-#include <openssl/err.h>
+#ifdef PISTACHE_SSL_GNUTLS
+// TODO: remove this altogether
+#endif /* PISTACHE_SSL_GNUTLS */
 
-#endif /* PISTACHE_USE_SSL */
+#include "srp_listener.h"
+#include "srp_peer.h"
 
+// Defined in credentials_lookup.cpp
+// TODO: custom callback support
+int credentials_lookup( gnutls_session_t, const char*, gnutls_datum_t*, gnutls_datum_t*, gnutls_datum_t*, gnutls_datum_t* );
 
 namespace Pistache {
 namespace Tcp {
@@ -40,7 +44,7 @@ namespace Tcp {
 namespace {
     volatile sig_atomic_t g_listen_fd = -1;
 
-    void closeListener() {
+    void closeSRPListener() {
         if (g_listen_fd != -1) {
             ::close(g_listen_fd);
             g_listen_fd = -1;
@@ -48,35 +52,11 @@ namespace {
     }
 
     void handle_sigint(int) {
-        closeListener();
+        closeSRPListener();
     }
 }
 
-void setSocketOptions(Fd fd, Flags<Options> options) {
-    if (options.hasFlag(Options::ReuseAddr)) {
-        int one = 1;
-        TRY(::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof (one)));
-    }
-
-    if (options.hasFlag(Options::Linger)) {
-        struct linger opt;
-        opt.l_onoff = 1;
-        opt.l_linger = 1;
-        TRY(::setsockopt(fd, SOL_SOCKET, SO_LINGER, &opt, sizeof (opt)));
-    }
-
-    if (options.hasFlag(Options::FastOpen)) {
-        int hint = 5;
-        TRY(::setsockopt(fd, SOL_TCP, TCP_FASTOPEN, &hint, sizeof (hint)));
-    }
-    if (options.hasFlag(Options::NoDelay)) {
-        int one = 1;
-        TRY(::setsockopt(fd, SOL_TCP, TCP_NODELAY, &one, sizeof (one)));
-    }
-
-}
-
-Listener::Listener()
+SRPListener::SRPListener()
     : addr_()
     , listen_fd(-1)
     , backlog_(Const::MaxBacklog)
@@ -89,7 +69,7 @@ Listener::Listener()
     , useSSL_(false)
 { }
 
-Listener::Listener(const Address& address)
+SRPListener::SRPListener(const Address& address)
     : addr_(address)
     , listen_fd(-1)
     , backlog_(Const::MaxBacklog)
@@ -103,22 +83,22 @@ Listener::Listener(const Address& address)
 {
 }
 
-Listener::~Listener() {
+SRPListener::~SRPListener() {
     if (isBound())
         shutdown();
     if (acceptThread.joinable())
         acceptThread.join();
-#ifdef PISTACHE_USE_SSL
+#ifdef PISTACHE_SSL_GNUTLS
     if (this->useSSL_)
     {
-        SSL_CTX_free((SSL_CTX *)this->ssl_ctx_);
-        EVP_cleanup();
+        gnutls_srp_free_server_credentials( srp_cred );
+        gnutls_certificate_free_credentials( cert_cred );
     }
-#endif /* PISTACHE_USE_SSL */
+#endif /* PISTACHE_SSL_GNUTLS */
 }
 
 void
-Listener::init(
+SRPListener::init(
     size_t workers,
     Flags<Options> options, int backlog)
 {
@@ -141,12 +121,12 @@ Listener::init(
 }
 
 void
-Listener::setHandler(const std::shared_ptr<Handler>& handler) {
+SRPListener::setHandler(const std::shared_ptr<Handler>& handler) {
     handler_ = handler;
 }
 
 void
-Listener::pinWorker(size_t worker, const CpuSet& set)
+SRPListener::pinWorker(size_t worker, const CpuSet& set)
 {
     UNUSED(worker)
     UNUSED(set)
@@ -164,12 +144,12 @@ Listener::pinWorker(size_t worker, const CpuSet& set)
 }
 
 void
-Listener::bind() {
+SRPListener::bind() {
     bind(addr_);
 }
 
 void
-Listener::bind(const Address& address) {
+SRPListener::bind(const Address& address) {
     if (!handler_)
         throw std::runtime_error("Call setHandler before calling bind()");
     addr_ = address;
@@ -222,20 +202,20 @@ Listener::bind(const Address& address) {
 }
 
 bool
-Listener::isBound() const {
+SRPListener::isBound() const {
     return listen_fd != -1;
 }
 
-// Return actual TCP port Listener is on, or 0 on error / no port.
+// Return actual TCP port SRPListener is on, or 0 on error / no port.
 // Notes:
 // 1) Default constructor for 'Port()' sets value to 0.
-// 2) Socket is created inside 'Listener::run()', which is called from
+// 2) Socket is created inside 'SRPListener::run()', which is called from
 //    'Endpoint::serve()' and 'Endpoint::serveThreaded()'.  So getting the
 //    port is only useful if you attempt to do so from a _different_ thread
-//    than the one running 'Listener::run()'.  So for a traditional single-
+//    than the one running 'SRPListener::run()'.  So for a traditional single-
 //    threaded program this method is of little value.
 Port
-Listener::getPort() const {
+SRPListener::getPort() const {
     if (listen_fd == -1) {
         return Port();
     }
@@ -252,7 +232,7 @@ Listener::getPort() const {
 }
 
 void
-Listener::run() {
+SRPListener::run() {
     shutdownFd.bind(poller);
     reactor_.run();
 
@@ -288,18 +268,18 @@ Listener::run() {
 }
 
 void
-Listener::runThreaded() {
+SRPListener::runThreaded() {
     acceptThread = std::thread([=]() { this->run(); });
 }
 
 void
-Listener::shutdown() {
+SRPListener::shutdown() {
     if (shutdownFd.isBound()) shutdownFd.notify();
     reactor_.shutdown();
 }
 
-Async::Promise<Listener::Load>
-Listener::requestLoad(const Listener::Load& old) {
+Async::Promise<SRPListener::Load>
+SRPListener::requestLoad(const SRPListener::Load& old) {
     auto handlers = reactor_.handlers(transportKey);
 
     std::vector<Async::Promise<rusage>> loads;
@@ -350,55 +330,60 @@ Listener::requestLoad(const Listener::Load& old) {
 }
 
 Address
-Listener::address() const {
+SRPListener::address() const {
     return addr_;
 }
 
 Options
-Listener::options() const {
+SRPListener::options() const {
     return options_;
 }
 
-void Listener::handleNewConnection()
+void SRPListener::handleNewConnection()
 {
     struct sockaddr_in peer_addr;
     int client_fd = acceptConnection(peer_addr);
 
-#ifdef PISTACHE_USE_SSL
-    SSL *ssl = nullptr;
+#ifdef PISTACHE_SSL_GNUTLS
+    gnutls_session_t *session;
+    if( this->useSSL_ ){
+        // Preconfigure the TLS session before passing to the Peer class
+        gnutls_init( session, GNUTLS_SERVER );
+        // TODO: Allow setting custom priorities for a universal SSL implementation
+        gnutls_priority_set_direct(
+            *session,
+            "NORMAL:+SRP:+SRP-DSS:+SRP-RSA",
+            NULL
+        );
+        // "NORMAL:-KX-ALL:+SRP:+SRP-DSS:+SRP-RSA",
+        // TODO: Add support for requesting a certificate from the client
+        // But for now disable it
+        gnutls_certificate_server_set_request( *session, GNUTLS_CERT_IGNORE );
 
-    if (this->useSSL_) {
-
-        ssl = SSL_new((SSL_CTX *)this->ssl_ctx_);
-        if (ssl == NULL)
-            throw std::runtime_error("Cannot create SSL connection");
-
-        SSL_set_fd(ssl, client_fd);
-        SSL_set_accept_state(ssl);
-
-        if (SSL_accept(ssl) <= 0) {
-            ERR_print_errors_fp(stderr);
-            SSL_free(ssl);
-            close(client_fd);
-            return ;
-        }
+        // Assign TLS credentials
+        gnutls_credentials_set( *session, GNUTLS_CRD_CERTIFICATE, cert_cred );
+        gnutls_credentials_set( *session, GNUTLS_CRD_SRP, srp_cred );
     }
-#endif /* PISTACHE_USE_SSL */
+#endif /* PISTACHE_SSL_GNUTLS */
 
     make_non_blocking(client_fd);
 
-    auto peer = std::make_shared<Peer>(Address::fromUnix((struct sockaddr *)&peer_addr));
+    auto peer = std::make_shared<SRPPeer>(Address::fromUnix((struct sockaddr *)&peer_addr));
     peer->associateFd(client_fd);
 
-#ifdef PISTACHE_USE_SSL
-    if (this->useSSL_)
-        peer->associateSSL(ssl);
-#endif /* PISTACHE_USE_SSL */
+    printf("1: %d\n", client_fd);
+    printf("2: %d\n", peer->fd());
+
+#ifdef PISTACHE_SSL_GNUTLS
+    if( this->useSSL_ ){
+        peer->initTLSSession( session );
+    }
+#endif /* PISTACHE_SSL_GNUTLS */
 
     dispatchPeer(peer);
 }
 
-int Listener::acceptConnection(struct sockaddr_in& peer_addr) const
+int SRPListener::acceptConnection(struct sockaddr_in& peer_addr) const
 {
     socklen_t peer_addr_len = sizeof(peer_addr);
     int client_fd = ::accept(listen_fd, (struct sockaddr *)&peer_addr, &peer_addr_len);
@@ -412,102 +397,109 @@ int Listener::acceptConnection(struct sockaddr_in& peer_addr) const
 }
 
 void
-Listener::dispatchPeer(const std::shared_ptr<Peer>& peer) {
+SRPListener::dispatchPeer(const std::shared_ptr<SRPPeer>& peer) {
     auto handlers = reactor_.handlers(transportKey);
     auto idx = peer->fd() % handlers.size();
+    printf("3: %d\n", peer->fd());
     auto transport = std::static_pointer_cast<Transport>(handlers[idx]);
 
     transport->handleNewPeer(peer);
 
 }
 
-#ifdef PISTACHE_USE_SSL
+#ifdef PISTACHE_SSL_GNUTLS
 
-static SSL_CTX *ssl_create_context(const std::string &cert, const std::string &key, bool use_compression)
-{
-    const SSL_METHOD    *method;
-    SSL_CTX             *ctx;
+// static SSL_CTX *ssl_create_context(const std::string &cert, const std::string &key, bool use_compression)
+// {
+//     const SSL_METHOD    *method;
+//     SSL_CTX             *ctx;
+//
+//     method = SSLv23_server_method();
+//
+//     ctx = SSL_CTX_new(method);
+//     if (ctx == NULL) {
+//         ERR_print_errors_fp(stderr);
+//         throw std::runtime_error("Cannot setup SSL context");
+//     }
+//
+//     if (!use_compression) {
+//         /* Disable compression to prevent BREACH and CRIME vulnerabilities. */
+//         if (!SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION)) {
+//             ERR_print_errors_fp(stderr);
+//             throw std::runtime_error("Cannot disable compression");
+//         }
+//     }
+//
+//     /* Function introduced in 1.0.2 */
+// #if OPENSSL_VERSION_NUMBER >= 0x10002000L
+//     SSL_CTX_set_ecdh_auto(ctx, 1);
+// #endif /* OPENSSL_VERSION_NUMBER */
+//
+//     if (SSL_CTX_use_certificate_file(ctx, cert.c_str(), SSL_FILETYPE_PEM) <= 0) {
+//         ERR_print_errors_fp(stderr);
+//         throw std::runtime_error("Cannot load SSL certificate");
+//     }
+//
+//     if (SSL_CTX_use_PrivateKey_file(ctx, key.c_str(), SSL_FILETYPE_PEM) <= 0) {
+//         ERR_print_errors_fp(stderr);
+//         throw std::runtime_error("Cannot load SSL private key");
+//     }
+//
+//     if (!SSL_CTX_check_private_key(ctx)) {
+//         ERR_print_errors_fp(stderr);
+//         throw std::runtime_error("Private key does not match public key in the certificate");
+//     }
+//
+//     return ctx;
+// }
 
-    method = SSLv23_server_method();
-
-    ctx = SSL_CTX_new(method);
-    if (ctx == NULL) {
-        ERR_print_errors_fp(stderr);
-        throw std::runtime_error("Cannot setup SSL context");
-    }
-
-    if (!use_compression) {
-        /* Disable compression to prevent BREACH and CRIME vulnerabilities. */
-        if (!SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION)) {
-            ERR_print_errors_fp(stderr);
-            throw std::runtime_error("Cannot disable compression");
-        }
-    }
-
-    /* Function introduced in 1.0.2 */
-#if OPENSSL_VERSION_NUMBER >= 0x10002000L
-    SSL_CTX_set_ecdh_auto(ctx, 1);
-#endif /* OPENSSL_VERSION_NUMBER */
-
-    if (SSL_CTX_use_certificate_file(ctx, cert.c_str(), SSL_FILETYPE_PEM) <= 0) {
-        ERR_print_errors_fp(stderr);
-        throw std::runtime_error("Cannot load SSL certificate");
-    }
-
-    if (SSL_CTX_use_PrivateKey_file(ctx, key.c_str(), SSL_FILETYPE_PEM) <= 0) {
-        ERR_print_errors_fp(stderr);
-        throw std::runtime_error("Cannot load SSL private key");
-    }
-
-    if (!SSL_CTX_check_private_key(ctx)) {
-        ERR_print_errors_fp(stderr);
-        throw std::runtime_error("Private key does not match public key in the certificate");
-    }
-
-    return ctx;
-}
+// void
+// SRPListener::setupSSLAuth(const std::string &ca_file, const std::string &ca_path, int (*cb)(int, void *) = NULL)
+// {
+//     const char *__ca_file = NULL;
+//     const char *__ca_path = NULL;
+//
+//     if (this->ssl_ctx_ == NULL)
+//         throw std::runtime_error("SSL Context is not initialized");
+//
+//     if (!ca_file.empty())
+//         __ca_file = ca_file.c_str();
+//     if (!ca_path.empty())
+//         __ca_path = ca_path.c_str();
+//
+//     if (SSL_CTX_load_verify_locations((SSL_CTX *)this->ssl_ctx_, __ca_file, __ca_path) <= 0) {
+//         ERR_print_errors_fp(stderr);
+//         throw std::runtime_error("Cannot verify SSL locations");
+//     }
+//
+//     SSL_CTX_set_verify((SSL_CTX *)this->ssl_ctx_,
+//         SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT | SSL_VERIFY_CLIENT_ONCE,
+//         /* Callback type did change in 1.0.1 */
+// #if OPENSSL_VERSION_NUMBER < 0x10100000L
+//         (int (*)(int, X509_STORE_CTX *))cb
+// #else
+//         (SSL_verify_cb)cb
+// #endif /* OPENSSL_VERSION_NUMBER */
+//     );
+// }
 
 void
-Listener::setupSSLAuth(const std::string &ca_file, const std::string &ca_path, int (*cb)(int, void *) = NULL)
+SRPListener::setupSSL( const char* cert_path,  const char* key_path, bool use_compression )
 {
-    const char *__ca_file = NULL;
-    const char *__ca_path = NULL;
+    // Verify an apropriate GnuTLS version is available with SRP support
+    if( gnutls_check_version( "3.3.0" ) == NULL )
+        throw std::runtime_error( "GnuTLS 3.3.0 or later is required." );
 
-    if (this->ssl_ctx_ == NULL)
-        throw std::runtime_error("SSL Context is not initialized");
+    gnutls_srp_allocate_server_credentials( &srp_cred );
+    // gnutls_srp_set_server_credentials_file( srp_cred, "tpasswd", "tpasswd.conf" );
+    gnutls_srp_set_server_credentials_function( srp_cred, credentials_lookup );
 
-    if (!ca_file.empty())
-        __ca_file = ca_file.c_str();
-    if (!ca_path.empty())
-        __ca_path = ca_path.c_str();
-
-    if (SSL_CTX_load_verify_locations((SSL_CTX *)this->ssl_ctx_, __ca_file, __ca_path) <= 0) {
-        ERR_print_errors_fp(stderr);
-        throw std::runtime_error("Cannot verify SSL locations");
-    }
-
-    SSL_CTX_set_verify((SSL_CTX *)this->ssl_ctx_,
-        SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT | SSL_VERIFY_CLIENT_ONCE,
-        /* Callback type did change in 1.0.1 */
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-        (int (*)(int, X509_STORE_CTX *))cb
-#else
-        (SSL_verify_cb)cb
-#endif /* OPENSSL_VERSION_NUMBER */
-    );
+    gnutls_certificate_allocate_credentials( &cert_cred );
+    // gnutls_certificate_set_x509_trust_file( cert_cred, CAFILE, GNUTLS_X509_FMT_PEM );
+    gnutls_certificate_set_x509_key_file( cert_cred, cert_path, key_path, GNUTLS_X509_FMT_PEM );
 }
 
-void
-Listener::setupSSL(const std::string &cert_path, const std::string &key_path, bool use_compression)
-{
-    SSL_load_error_strings();
-    OpenSSL_add_ssl_algorithms();
-
-    this->ssl_ctx_ = ssl_create_context(cert_path, key_path, use_compression);
-    this->useSSL_ = true;
-}
-
-#endif /* PISTACHE_USE_SSL */
+#endif /* PISTACHE_SSL_GNUTLS */
 
 } // namespace Tcp
 } // namespace Pistache

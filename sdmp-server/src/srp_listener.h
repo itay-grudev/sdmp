@@ -20,20 +20,21 @@
 #include <memory>
 #include <thread>
 
+#define PISTACHE_SSL_GNUTLS
 
-#ifdef PISTACHE_USE_SSL
-#include <openssl/ssl.h>
-#endif /* PISTACHE_USE_SSL */
+#ifdef PISTACHE_SSL_GNUTLS
+#include <gnutls/gnutls.h>
+#endif /* PISTACHE_SSL_GNUTLS */
 
 namespace Pistache {
 namespace Tcp {
 
-class Peer;
+class SRPPeer;
 class Transport;
 
 void setSocketOptions(Fd fd, Flags<Options> options);
 
-class Listener {
+class SRPListener {
 public:
 
     struct Load {
@@ -45,10 +46,10 @@ public:
         TimePoint tick;
     };
 
-    Listener();
-    ~Listener();
+    SRPListener();
+    ~SRPListener();
 
-    explicit Listener(const Address& address);
+    explicit SRPListener(const Address& address);
     void init(
             size_t workers,
             Flags<Options> options = Options::None,
@@ -73,8 +74,8 @@ public:
 
     void pinWorker(size_t worker, const CpuSet& set);
 
-    void setupSSL(const std::string &cert_path, const std::string &key_path, bool use_compression);
-    void setupSSLAuth(const std::string &ca_file, const std::string &ca_path, int (*cb)(int, void *));
+    void setupSSL( const char* cert_path,  const char* key_path, bool use_compression);
+    // void setupSSLAuth(const std::string &ca_file, const std::string &ca_path, int (*cb)(int, void *));
 
 private:
     Address addr_;
@@ -92,9 +93,12 @@ private:
     Aio::Reactor reactor_;
     Aio::Reactor::Key transportKey;
 
+    gnutls_srp_server_credentials_t srp_cred;
+    gnutls_certificate_credentials_t cert_cred;
+
     void handleNewConnection();
     int acceptConnection(struct sockaddr_in& peer_addr) const;
-    void dispatchPeer(const std::shared_ptr<Peer>& peer);
+    void dispatchPeer(const std::shared_ptr<SRPPeer>& peer);
 
     bool useSSL_;
     void *ssl_ctx_;

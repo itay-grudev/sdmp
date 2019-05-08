@@ -8,65 +8,92 @@
 
 #include <sys/socket.h>
 
-#include <pistache/peer.h>
 #include <pistache/async.h>
 #include <pistache/transport.h>
+
+#include "srp_peer.h"
+
+#define LOOP_CHECK( rval, cmd ) \
+    do { \
+        rval = cmd; \
+    } while( rval == GNUTLS_E_AGAIN || rval == GNUTLS_E_INTERRUPTED )
 
 namespace Pistache {
 namespace Tcp {
 
-Peer::Peer()
+SRPPeer::SRPPeer()
     : transport_(nullptr)
     , fd_(-1)
-    , ssl_(NULL)
+    , gnutls_session_(NULL)
 { }
 
-Peer::Peer(const Address& addr)
+SRPPeer::SRPPeer(const Address& addr)
     : transport_(nullptr)
     , addr(addr)
     , fd_(-1)
-    , ssl_(NULL)
+    , gnutls_session_(NULL)
 { }
 
-Peer::~Peer()
+SRPPeer::~SRPPeer()
 {
-#ifdef PISTACHE_USE_SSL
-    if (ssl_)
-        SSL_free((SSL *)ssl_);
-#endif /* PISTACHE_USE_SSL */
+#ifdef PISTACHE_SSL_GNUTLS
+    gnutls_deinit( *gnutls_session_ );
+#endif /* PISTACHE_SSL_GNUTLS */
 }
 
-const Address& Peer::address() const
+const Address& SRPPeer::address() const
 {
     return addr;
 }
 
-const std::string& Peer::hostname() const
+const std::string& SRPPeer::hostname() const
 {
     return hostname_;
 }
 
 void
-Peer::associateFd(int fd) {
+SRPPeer::associateFd(int fd) {
     fd_ = fd;
 }
 
-#ifdef PISTACHE_USE_SSL
-void
-Peer::associateSSL(void *ssl)
+#ifdef PISTACHE_SSL_GNUTLS
+void SRPPeer::initTLSSession( gnutls_session_t* gnutls_session )
 {
-    ssl_ = ssl;
+    gnutls_session_ = gnutls_session;
+
+    gnutls_transport_set_int( *gnutls_session_, fd_ );
+    int ret;
+    LOOP_CHECK( ret, gnutls_handshake( *gnutls_session_ ));
+    if( ret < 0 ){
+        close( fd_ );
+        gnutls_deinit( *gnutls_session_ );
+        throw std::runtime_error(
+            "Handshake has failed (" +
+            std::string( gnutls_strerror( ret )) +
+            ")"
+        );
+    }
+
+    // TODO: Drop this logging. Only used for debugging the SRP connection
+    // establishment
+    printf( "Handshake completed\n" );
+    printf(
+        "    User connected: %s\n",
+        gnutls_srp_server_get_username( *gnutls_session_ )
+    );
 }
 
-void *
-Peer::ssl(void) const {
-    return ssl_;
+gnutls_session_t* SRPPeer::gnutls_session   ()
+{
+    return gnutls_session_;
 }
-#endif /* PISTACHE_USE_SSL */
+#endif /* PISTACHE_SSL_GNUTLS */
 
 int
-Peer::fd() const {
+SRPPeer::fd() const {
+    printf("2.1: %d\n", fd_);
     if (fd_ == -1) {
+        printf("2.2: %d\n", fd_);
         throw std::runtime_error("The peer has no associated fd");
     }
 
@@ -74,7 +101,7 @@ Peer::fd() const {
 }
 
 void
-Peer::putData(std::string name, std::shared_ptr<Pistache::Http::Private::ParserBase> data) {
+SRPPeer::putData(std::string name, std::shared_ptr<Pistache::Http::Private::ParserBase> data) {
     auto it = data_.find(name);
     if (it != std::end(data_)) {
         throw std::runtime_error("The data already exists");
@@ -84,7 +111,7 @@ Peer::putData(std::string name, std::shared_ptr<Pistache::Http::Private::ParserB
 }
 
 std::shared_ptr<Pistache::Http::Private::ParserBase>
-Peer::getData(std::string name) const {
+SRPPeer::getData(std::string name) const {
     auto data = tryGetData(std::move(name));
     if (data == nullptr) {
         throw std::runtime_error("The data does not exist");
@@ -94,7 +121,7 @@ Peer::getData(std::string name) const {
 }
 
 std::shared_ptr<Pistache::Http::Private::ParserBase>
-Peer::tryGetData(std::string(name)) const {
+SRPPeer::tryGetData(std::string(name)) const {
     auto it = data_.find(name);
     if (it == std::end(data_)) return nullptr;
 
@@ -102,23 +129,23 @@ Peer::tryGetData(std::string(name)) const {
 }
 
 Async::Promise<ssize_t>
-Peer::send(const RawBuffer& buffer, int flags) {
+SRPPeer::send(const RawBuffer& buffer, int flags) {
     return transport()->asyncWrite(fd_, buffer, flags);
 }
 
-std::ostream& operator<<(std::ostream& os, const Peer& peer) {
+std::ostream& operator<<(std::ostream& os, const SRPPeer& peer) {
     const auto& addr = peer.address();
     os << "(" << addr.host() << ", " << addr.port() << ") [" << peer.hostname() << "]";
     return os;
 }
 
 void
-Peer::associateTransport(Transport* transport) {
+SRPPeer::associateTransport(Transport* transport) {
     transport_ = transport;
 }
 
 Transport*
-Peer::transport() const {
+SRPPeer::transport() const {
     if (!transport_)
         throw std::logic_error("Orphaned peer");
 

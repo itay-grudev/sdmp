@@ -6,7 +6,6 @@
 
 #include <pistache/config.h>
 #include <pistache/tcp.h>
-#include <pistache/peer.h>
 
 #include "srp_endpoint.h"
 
@@ -75,13 +74,13 @@ SRPEndpoint::bind(const Address& addr) {
 void
 SRPEndpoint::serve()
 {
-    serveImpl(&Tcp::Listener::run);
+    serveImpl(&Tcp::SRPListener::run);
 }
 
 void
 SRPEndpoint::serveThreaded()
 {
-    serveImpl(&Tcp::Listener::runThreaded);
+    serveImpl(&Tcp::SRPListener::runThreaded);
 }
 
 void
@@ -93,32 +92,18 @@ SRPEndpoint::shutdown()
 void
 SRPEndpoint::useSSL(std::string cert, std::string key, bool use_compression)
 {
-#ifndef PISTACHE_USE_SSL
+#ifndef PISTACHE_SSL_GNUTLS
     (void)cert;
     (void)key;
     (void)use_compression;
     throw std::runtime_error("Pistache is not compiled with SSL support.");
 #else
-    listener.setupSSL(cert, key, use_compression);
-#endif /* PISTACHE_USE_SSL */
+    listener.setupSSL( cert.c_str(), key.c_str(), use_compression );
+#endif /* PISTACHE_SSL_GNUTLS */
 }
 
-void
-SRPEndpoint::useSSLAuth(std::string ca_file, std::string ca_path, int (*cb)(int, void *))
-{
-#ifndef PISTACHE_USE_SSL
-    (void)ca_file;
-    (void)ca_path;
-    (void)cb;
-    throw std::runtime_error("Pistache is not compiled with SSL support.");
-#else
-    listener.setupSSLAuth(ca_file, ca_path, cb);
-#endif /* PISTACHE_USE_SSL */
-
-}
-
-Async::Promise<Tcp::Listener::Load>
-SRPEndpoint::requestLoad(const Tcp::Listener::Load& old) {
+Async::Promise<Tcp::SRPListener::Load>
+SRPEndpoint::requestLoad(const Tcp::SRPListener::Load& old) {
     return listener.requestLoad(old);
 }
 

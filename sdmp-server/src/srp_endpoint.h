@@ -6,9 +6,12 @@
 
 #pragma once
 
-#include <pistache/listener.h>
 #include <pistache/net.h>
 #include <pistache/http.h>
+
+#include "srp_listener.h"
+
+#define PISTACHE_SSL_GNUTLS
 
 namespace Pistache {
 namespace Http {
@@ -122,7 +125,7 @@ public:
         return listener.getPort();
     }
 
-    Async::Promise<Tcp::Listener::Load> requestLoad(const Tcp::Listener::Load& old);
+    Async::Promise<Tcp::SRPListener::Load> requestLoad(const Tcp::SRPListener::Load& old);
 
     static Options options();
 
@@ -143,7 +146,7 @@ private:
     }
 
     std::shared_ptr<Handler> handler_;
-    Tcp::Listener listener;
+    Tcp::SRPListener listener;
 };
 
 template<typename Handler>
