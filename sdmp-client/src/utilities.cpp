@@ -34,7 +34,7 @@
  */
 int tcp_connect(void)
 {
-        const char *PORT = "8080";
+        const char *PORT = "2586";
         const char *SERVER = "127.0.0.1";
         int err, sd;
         struct sockaddr_in sa;
