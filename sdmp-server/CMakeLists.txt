@@ -28,15 +28,11 @@ add_executable( ${PROJECT_NAME} ${SOURCES} )
 ##
 # Required packages
 #
-include( CheckIncludeFiles )
-include( CheckFunctionExists )
 
-check_include_files( getopt.h               HAVE_GETOPT_H )
-check_function_exists( getopt_long          HAVE_GETOPT_LONG )
-check_include_files( unistd.h               HAVE_UNISTD_H )
-check_include_files( arpa/inet.h            HAVE_ARPA_INET_H )
-check_include_files( pistache/endpoint.h    HAVE_PISTACHE_ENDPOINT_H )
-check_include_files( odb/core.hxx           HAVE_ODB_CORE_H )
+# Debugging
+if (CMAKE_BUILD_TYPE EQUAL "DEBUG")
+    target_link_libraries( ${PROJECT_NAME} dl )
+endif (CMAKE_BUILD_TYPE EQUAL "DEBUG")
 
 # GnuTLS
 include(GnuTLS)
@@ -44,8 +40,9 @@ target_link_libraries( ${PROJECT_NAME} ${GNUTLS_LIBRARIES} )
 
 # Pistache
 set( PISTACHE_DIR "libs/pistache/" )
-include_directories( ${CMAKE_SOURCE_DIR} ${PISTACHE_DIR} "include/" )
+include_directories( "${CMAKE_SOURCE_DIR}/${PISTACHE_DIR}/include/" )
 target_link_libraries( ${PROJECT_NAME}  "pthread" "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libpistache.a" )
+add_dependencies( ${PROJECT_NAME} ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libpistache.a )
 
 ##
 # Embed files

@@ -26,6 +26,12 @@ set( CMAKE_CXX_STANDARD 11 )
 ##
 # Subprojects
 #
+
+# Pistache
+set( PISTACHE_USE_SSL OFF CACHE BOOL "add server support for SSL via OpenSSL" FORCE )
+set( PISTACHE_SSL_GNUTLS ON CACHE BOOL "add server support for SSL via GnuTLS" FORCE )
 add_subdirectory( libs/pistache )
-add_subdirectory( sdmp-server )
+add_custom_target( libpistache DEPENDS ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/libpistache.a )
+
 add_subdirectory( sdmp-client )
+add_subdirectory( sdmp-server )
