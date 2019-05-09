@@ -36,10 +36,11 @@
 #include <pistache/endpoint.h>
 
 // GnuTLS
-#include <gnutls/gnutls.h>
+// #include <gnutls/gnutls.h>
 
 // Web API
 #include "public_api.h"
+#include "private_api.h"
 
 // Data Storage
 #include "data/user.h"
@@ -68,6 +69,7 @@ inline int error();
 bool VerboseFlag = false;
 bool ExitFlag = false;
 PublicApi *public_api;
+PrivateApi *private_api;
 
 void signal_handler( int );
 
@@ -142,134 +144,154 @@ int main( int argc, char* argv[] )
         }
     }
 
-    // Attach signal handlers to terminate the server gracefully
-    std::signal( SIGHUP,  signal_handler );
-    std::signal( SIGINT,  signal_handler );
-    std::signal( SIGTERM, signal_handler );
-
     // Public API
     Pistache::Address public_api_addr( Pistache::Ipv4::any(), Pistache::Port( httpPort ));
     public_api = new PublicApi( public_api_addr );
-    public_api->init( Pistache::hardware_concurrency() );
-    public_api->start();
-    printf( "SDMP Server ready. Listening on port '%d'.\n", httpPort );
+    public_api->init( 1 );
+    public_api->startThreaded();
+    printf( "SDMP Public API Ready. Listening on port '%d'.\n", httpPort );
 
-    if( gnutls_check_version( "3.3.0" ) == NULL ){
-        std::cerr << "GnuTLS 3.3.0 or later is required." << std::endl;
-        return error();
-    }
+    // Private (SRP) API
+    // Pistache::Address private_api_addr( Pistache::Ipv4::any(), Pistache::Port( srpPort ));
+    // private_api = new PrivateApi( private_api_addr );
+    // private_api->init( Pistache::hardware_concurrency() );
 
-    // SRP Credentials initialisation
-    gnutls_srp_server_credentials_t srp_cred;
-    gnutls_srp_allocate_server_credentials( &srp_cred );
-    gnutls_srp_set_server_credentials_file( srp_cred, "tpasswd", "tpasswd.conf" );
-    gnutls_srp_set_server_credentials_function( srp_cred, credentials_lookup );
+    // private_api->startThreaded();
+    printf( "SDMP Private API Ready. Listening on port '%d'.\n", srpPort );
 
-    gnutls_certificate_allocate_credentials( &cert_cred );
-    gnutls_certificate_set_x509_trust_file( cert_cred, CAFILE, GNUTLS_X509_FMT_PEM );
-    gnutls_certificate_set_x509_key_file( cert_cred, CERTFILE, KEYFILE, GNUTLS_X509_FMT_PEM );
+    // Wait for interrupt
+    sigset_t sigset;
+    sigemptyset( &sigset );
+    sigaddset( &sigset, SIGHUP );
+    sigaddset( &sigset, SIGINT );
+    sigaddset( &sigset, SIGTERM );
+    sigprocmask( SIG_BLOCK, &sigset, nullptr );
+    int sig = 0;
+    sigwait( &sigset, &sig );
+    std::cerr << "Shutting down..." << std::endl;
+    sigprocmask( SIG_UNBLOCK, &sigset, nullptr );
 
-    // TCP socket operations
-    listen_sd = socket( AF_INET, SOCK_STREAM, 0 );
-    SOCKET_ERR( listen_sd, "socket" );
+    public_api->stop();
+    private_api->stop();
 
-    memset( &sa_serv, '\0', sizeof(sa_serv) );
-    sa_serv.sin_family = AF_INET;
-    sa_serv.sin_addr.s_addr = INADDR_ANY;
-    sa_serv.sin_port = htons( srpPort );
-
-    setsockopt( listen_sd, SOL_SOCKET, SO_REUSEADDR, (void*)&optval, sizeof(int) );
-
-    err = bind( listen_sd, (struct sockaddr*)&sa_serv, sizeof(sa_serv) );
-    SOCKET_ERR( err, "bind" );
-    err = listen( listen_sd, 1024 );
-    SOCKET_ERR( err, "listen" );
-
-    printf( "SDMP Server ready. Listening on port '%d'.\n\n", srpPort );
-
-    client_len = sizeof( sa_cli );
-    while( !ExitFlag ){
-        gnutls_init( &session, GNUTLS_SERVER );
-        gnutls_priority_set_direct(
-            session,
-            "NORMAL:-KX-ALL:+SRP:+SRP-DSS:+SRP-RSA",
-            NULL
-        );
-        // "NORMAL:-KX-ALL:+SRP:+SRP-DSS:+SRP-RSA",
-        gnutls_credentials_set( session, GNUTLS_CRD_SRP, srp_cred );
-        // For certificate authenticated ciphersuites
-        // gnutls_credentials_set( session, GNUTLS_CRD_CERTIFICATE, cert_cred );
-
-        // We don't request a certificate from the client
-        gnutls_certificate_server_set_request( session, GNUTLS_CERT_IGNORE );
-
-        sd = accept( listen_sd, (struct sockaddr*) &sa_cli, &client_len );
-
-        printf(
-            "- connection from %s, port %d\n",
-            inet_ntop(AF_INET, &sa_cli.sin_addr, topbuf, sizeof(topbuf) ),
-            ntohs( sa_cli.sin_port )
-        );
-
-        gnutls_transport_set_int( session, sd );
-
-        LOOP_CHECK( ret, gnutls_handshake( session ));
-        if( ret < 0 ){
-            close( sd );
-            gnutls_deinit( session );
-            fprintf(
-                stderr,
-                "*** Handshake has failed (%s)\n\n",
-                gnutls_strerror( ret )
-            );
-            continue;
-        }
-        printf( "- Handshake was completed\n" );
-        printf(
-            "- User %s was connected\n",
-            gnutls_srp_server_get_username( session )
-        );
-
-        // print_info( session );
-
-        while( !ExitFlag ){
-            LOOP_CHECK( ret, gnutls_record_recv( session, buffer, MAX_BUF ));
-
-            if( ret == 0 ){
-                printf( "\n- Peer has closed the GnuTLS connection\n" );
-                break;
-            } else if(
-                ret < 0 &&
-                gnutls_error_is_fatal( ret ) == 0
-            ){
-                fprintf( stderr, "*** Warning: %s\n", gnutls_strerror( ret ) );
-            } else if( ret < 0 ){
-                fprintf(
-                    stderr,
-                    "\n*** Received corrupted data(%d). Closing the connection.\n\n",
-                    ret
-                );
-                break;
-            } else if( ret > 0 ){
-                // echo data back to the client
-                gnutls_record_send( session, buffer, ret );
-            }
-        }
-
-        printf( "\n" );
-
-        // do not wait for the peer to close the connection.
-        LOOP_CHECK( ret, gnutls_bye( session, GNUTLS_SHUT_WR ) );
-
-        close( sd );
-        gnutls_deinit( session );
-
-    }
-
-    close( listen_sd );
-
-    gnutls_srp_free_server_credentials( srp_cred );
-    gnutls_certificate_free_credentials( cert_cred );
+    return 0;
+    //
+    // if( gnutls_check_version( "3.3.0" ) == NULL ){
+    //     std::cerr << "GnuTLS 3.3.0 or later is required." << std::endl;
+    //     return error();
+    // }
+    //
+    // // SRP Credentials initialisation
+    // gnutls_srp_server_credentials_t srp_cred;
+    // gnutls_srp_allocate_server_credentials( &srp_cred );
+    // gnutls_srp_set_server_credentials_file( srp_cred, "tpasswd", "tpasswd.conf" );
+    // gnutls_srp_set_server_credentials_function( srp_cred, credentials_lookup );
+    //
+    // gnutls_certificate_allocate_credentials( &cert_cred );
+    // gnutls_certificate_set_x509_trust_file( cert_cred, CAFILE, GNUTLS_X509_FMT_PEM );
+    // gnutls_certificate_set_x509_key_file( cert_cred, CERTFILE, KEYFILE, GNUTLS_X509_FMT_PEM );
+    //
+    // // TCP socket operations
+    // listen_sd = socket( AF_INET, SOCK_STREAM, 0 );
+    // SOCKET_ERR( listen_sd, "socket" );
+    //
+    // memset( &sa_serv, '\0', sizeof(sa_serv) );
+    // sa_serv.sin_family = AF_INET;
+    // sa_serv.sin_addr.s_addr = INADDR_ANY;
+    // sa_serv.sin_port = htons( srpPort );
+    //
+    // setsockopt( listen_sd, SOL_SOCKET, SO_REUSEADDR, (void*)&optval, sizeof(int) );
+    //
+    // err = bind( listen_sd, (struct sockaddr*)&sa_serv, sizeof(sa_serv) );
+    // SOCKET_ERR( err, "bind" );
+    // err = listen( listen_sd, 1024 );
+    // SOCKET_ERR( err, "listen" );
+    //
+    // printf( "SDMP Server ready. Listening on port '%d'.\n\n", srpPort );
+    //
+    // client_len = sizeof( sa_cli );
+    // while( !ExitFlag ){
+    //     gnutls_init( &session, GNUTLS_SERVER );
+    //     gnutls_priority_set_direct(
+    //         session,
+    //         "NORMAL:-KX-ALL:+SRP:+SRP-DSS:+SRP-RSA",
+    //         NULL
+    //     );
+    //     // "NORMAL:-KX-ALL:+SRP:+SRP-DSS:+SRP-RSA",
+    //     gnutls_credentials_set( session, GNUTLS_CRD_SRP, srp_cred );
+    //     // For certificate authenticated ciphersuites
+    //     // gnutls_credentials_set( session, GNUTLS_CRD_CERTIFICATE, cert_cred );
+    //
+    //     // We don't request a certificate from the client
+    //     gnutls_certificate_server_set_request( session, GNUTLS_CERT_IGNORE );
+    //
+    //     sd = accept( listen_sd, (struct sockaddr*) &sa_cli, &client_len );
+    //
+    //     printf(
+    //         "- connection from %s, port %d\n",
+    //         inet_ntop(AF_INET, &sa_cli.sin_addr, topbuf, sizeof(topbuf) ),
+    //         ntohs( sa_cli.sin_port )
+    //     );
+    //
+    //     gnutls_transport_set_int( session, sd );
+    //
+    //     LOOP_CHECK( ret, gnutls_handshake( session ));
+    //     if( ret < 0 ){
+    //         close( sd );
+    //         gnutls_deinit( session );
+    //         fprintf(
+    //             stderr,
+    //             "*** Handshake has failed (%s)\n\n",
+    //             gnutls_strerror( ret )
+    //         );
+    //         continue;
+    //     }
+    //     printf( "- Handshake was completed\n" );
+    //     printf(
+    //         "- User %s was connected\n",
+    //         gnutls_srp_server_get_username( session )
+    //     );
+    //
+    //     // print_info( session );
+    //
+    //     while( !ExitFlag ){
+    //         LOOP_CHECK( ret, gnutls_record_recv( session, buffer, MAX_BUF ));
+    //
+    //         if( ret == 0 ){
+    //             printf( "\n- Peer has closed the GnuTLS connection\n" );
+    //             break;
+    //         } else if(
+    //             ret < 0 &&
+    //             gnutls_error_is_fatal( ret ) == 0
+    //         ){
+    //             fprintf( stderr, "*** Warning: %s\n", gnutls_strerror( ret ) );
+    //         } else if( ret < 0 ){
+    //             fprintf(
+    //                 stderr,
+    //                 "\n*** Received corrupted data(%d). Closing the connection.\n\n",
+    //                 ret
+    //             );
+    //             break;
+    //         } else if( ret > 0 ){
+    //             // echo data back to the client
+    //             gnutls_record_send( session, buffer, ret );
+    //         }
+    //     }
+    //
+    //     printf( "\n" );
+    //
+    //     // do not wait for the peer to close the connection.
+    //     LOOP_CHECK( ret, gnutls_bye( session, GNUTLS_SHUT_WR ) );
+    //
+    //     close( sd );
+    //     gnutls_deinit( session );
+    //
+    // }
+    //
+    // close( listen_sd );
+    //
+    // gnutls_srp_free_server_credentials( srp_cred );
+    // gnutls_certificate_free_credentials( cert_cred );
 
     public_api->stop();
     return 0;
@@ -282,6 +304,7 @@ void signal_handler( int signal ){
         case SIGTERM:
             ExitFlag = true;
             public_api->stop();
+            private_api->stop();
             printf( "Shutting down...\n" );
             break;
     }
