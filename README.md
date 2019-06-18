@@ -1,7 +1,8 @@
 # SDMP Reference Implementation
-
 Secure Device Management Protocol Client, Server and Device Client reference
 implementation.
+
+The Secure Device Management Protocol (SDMP) allows messaging and management of mobile devices to allows operations like remotely ringing, tracking, locking or erasing your device. Mobile devices are often connected through WiFi or cellular data with intermittent connectivity and behind NAT or a firewall, so to go around that the protocol employs a relay server. However with an innovative approach and end-to-end encryption the protocol prevents the relay server from reading messages or impersonating the user. A key feature of the protocol is that it uses a single password used for both authentication with the relay server and the end-to-end encryption. This password is never shared with the relay server during authentication by employing the Stanford Remote Password (SRP) protocol which allows the same password to be used for encryption of the communication.
 
 ## Requirements
     * `odb`
