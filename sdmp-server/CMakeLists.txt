@@ -64,7 +64,7 @@ endfunction()
 add_resource( "src/static/index.html" )
 add_resource( "src/static/status.json" )
 add_resource( "src/static/not_found.json" )
-add_custom_target( rc ALL DEPENDS ${RC_DEPENDS} )
+add_custom_target( static-resources ALL DEPENDS ${RC_DEPENDS} )
 
 ##
 # SSL Private key & Certificate

@@ -16,6 +16,8 @@ The Secure Device Management Protocol (SDMP) allows messaging and management of 
 
 ```bash
 cmake ./
+make static-resources # see sdmp-server/CMakeLists.txt
+make ssl-cert # see sdmp-server/CMakeLists.txt
 make
 ```
 
